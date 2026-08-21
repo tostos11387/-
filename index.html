@@ -67,12 +67,15 @@
     }
     .fab-btn:active { transform: scale(0.92); }
 
-    /* 頂部系列標籤列 (點擊變藍) */
+    /* 頂部系列標籤列 (支援拖曳排序) */
     .category-filter { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 8px 0; scrollbar-width: none; align-items: center; }
     .category-filter::-webkit-scrollbar { display: none; }
-    .cat-pill { padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; background: #fff; border: 1px solid var(--border); color: #64748b; white-space: nowrap; cursor: pointer; transition: background-color 0.2s, color 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+    .cat-pill { padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; background: #fff; border: 1px solid var(--border); color: #64748b; white-space: nowrap; cursor: grab; transition: background-color 0.2s, color 0.2s, transform 0.15s, box-shadow 0.15s; display: inline-flex; align-items: center; gap: 6px; touch-action: pan-x; user-select: none; }
+    .cat-pill:active { cursor: grabbing; }
+    .cat-pill.dragging { opacity: 0.4; transform: scale(0.95); background: #e2e8f0 !important; }
+    .cat-pill.drag-over { border: 2px dashed var(--primary); transform: scale(1.05); }
     .cat-pill.active { background: var(--primary) !important; color: #fff !important; border-color: var(--primary) !important; }
-    .cat-pill-add { border-style: dashed; border-color: var(--primary); color: var(--primary); background: #eff6ff; }
+    .cat-pill-add { border-style: dashed; border-color: var(--primary); color: var(--primary); background: #eff6ff; cursor: pointer; }
     
     /* 標籤上的刪除叉叉按鈕 */
     .cat-del-btn {
@@ -282,7 +285,7 @@
         <div>目前營業額：<strong id="barMoney" style="color:var(--primary); font-size: 1.15rem;">$0</strong></div>
       </div>
 
-      <!-- 頂部系列標籤切換列 (點擊變藍，末端可快速新增標籤) -->
+      <!-- 頂部系列標籤切換列 (支援長按拖曳排序) -->
       <div class="category-filter" id="salesCategoryTabs"></div>
 
       <input type="text" id="salesSearchInput" class="search-input" placeholder="搜尋當前商品或套組名稱..." oninput="renderSalesSection()">
@@ -566,6 +569,9 @@
   let confirmStep = 0;
   let pendingImportData = null;
 
+  // 用於拖曳排序的暫存變數
+  let draggedSeriesId = null;
+
   // 初始化預設示範方案
   if (plansIndex.length === 0) {
     const initPlanId = 'plan_' + Date.now();
@@ -723,7 +729,6 @@
 
     const saved = JSON.parse(localStorage.getItem(`plan_data_v27_${id}`) || '{}');
     
-    // 相容舊資料轉換：若舊資料有 seriesId（單選字串），轉為 seriesIds（陣列）
     const rawItems = saved.items || [];
     const processedItems = rawItems.map((itm, idx) => {
       let sIds = itm.seriesIds;
@@ -878,7 +883,7 @@
     return consumedMap;
   }
 
-  // --- 標籤系列管理 ---
+  // --- 標籤系列管理與拖曳排序 ---
   function openQuickAddSeriesModal() {
     document.getElementById('quickSeriesNameInput').value = '';
     document.getElementById('quickAddSeriesModal').style.display = 'flex';
@@ -957,6 +962,61 @@
     renderSeriesManager();
     updateSeriesCheckboxes();
     renderAll();
+  }
+
+  // 拖曳排序事件處理
+  function handleDragStart(e, id) {
+    draggedSeriesId = id;
+    e.target.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  function handleDragEnter(e, id) {
+    e.preventDefault();
+    const pill = e.currentTarget;
+    if (id !== draggedSeriesId && id !== 'ALL') {
+      pill.classList.add('drag-over');
+    }
+  }
+
+  function handleDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+  }
+
+  function handleDrop(e, targetId) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    if (!draggedSeriesId || draggedSeriesId === targetId || targetId === 'ALL') return;
+
+    currentPlanData.series.sort((a, b) => a.order - b.order);
+    const srcIdx = currentPlanData.series.findIndex(s => s.id === draggedSeriesId);
+    const tgtIdx = currentPlanData.series.findIndex(s => s.id === targetId);
+
+    if (srcIdx < 0 || tgtIdx < 0) return;
+
+    // 調整順序
+    const movedItem = currentPlanData.series.splice(srcIdx, 1)[0];
+    currentPlanData.series.splice(tgtIdx, 0, movedItem);
+
+    // 重新賦予 order 數值
+    currentPlanData.series.forEach((s, idx) => s.order = idx);
+
+    saveCurrentPlanData();
+    renderAll();
+    showToast('標籤順序已更新！');
+  }
+
+  function handleDragEnd(e) {
+    draggedSeriesId = null;
+    document.querySelectorAll('.cat-pill').forEach(el => {
+      el.classList.remove('dragging');
+      el.classList.remove('drag-over');
+    });
   }
 
   function startDeleteSeriesFlow(id, e) {
@@ -1602,7 +1662,6 @@
         const importedData = data.data || data;
         if (!importedData.series || !importedData.items || !importedData.bundles) throw new Error();
         
-        // 匯入相容轉換
         importedData.items = (importedData.items || []).map((itm, idx) => {
           let sIds = itm.seriesIds;
           if (!sIds) sIds = itm.seriesId ? [itm.seriesId] : [];
@@ -1679,7 +1738,6 @@
         currentPlanData.series = currentPlanData.series.filter(x => x.id !== confirmTargetId);
         if (activeCategoryFilter === confirmTargetId) activeCategoryFilter = 'ALL';
         
-        // 從所有單品的 seriesIds 中移除被刪除的標籤 id
         currentPlanData.items.forEach(i => {
           if (i.seriesIds) {
             i.seriesIds = i.seriesIds.filter(id => id !== confirmTargetId);
@@ -1732,11 +1790,23 @@
     
     currentPlanData.series.forEach(s => {
       const isActive = activeCategoryFilter === s.id;
-      salesTabsEl.innerHTML += `
-        <div class="cat-pill ${isActive ? 'active' : ''}" onclick="setCategoryFilter('${s.id}')">
-          <span>${s.name}</span>
-          <button class="cat-del-btn" onclick="startDeleteSeriesFlow('${s.id}', event)" title="刪除標籤">✕</button>
-        </div>`;
+      const pill = document.createElement('div');
+      pill.className = `cat-pill ${isActive ? 'active' : ''}`;
+      pill.draggable = true;
+      pill.innerHTML = `
+        <span onclick="setCategoryFilter('${s.id}')">${s.name}</span>
+        <button class="cat-del-btn" onclick="startDeleteSeriesFlow('${s.id}', event)" title="刪除標籤">✕</button>
+      `;
+
+      // 綁定拖曳排序事件
+      pill.addEventListener('dragstart', (e) => handleDragStart(e, s.id));
+      pill.addEventListener('dragover', handleDragOver);
+      pill.addEventListener('dragenter', (e) => handleDragEnter(e, s.id));
+      pill.addEventListener('dragleave', handleDragLeave);
+      pill.addEventListener('drop', (e) => handleDrop(e, s.id));
+      pill.addEventListener('dragend', handleDragEnd);
+
+      salesTabsEl.appendChild(pill);
     });
     salesTabsEl.innerHTML += `<div class="cat-pill cat-pill-add" onclick="openQuickAddSeriesModal()">+ 新增標籤</div>`;
 
@@ -1772,7 +1842,6 @@
       return matchCat && matchQ;
     });
 
-    // 修改單品篩選：只要單品的 seriesIds 包含當前過濾標籤即可符合
     const filteredItems = currentPlanData.items.filter(i => {
       const matchCat = activeCategoryFilter === 'ALL' || (i.seriesIds && i.seriesIds.includes(activeCategoryFilter));
       const matchQ = !q || i.name.toLowerCase().includes(q);

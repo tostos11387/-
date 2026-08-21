@@ -405,9 +405,12 @@
     <!-- 2. 套組設定 (套組上下排序與管理) -->
     <div id="paneBundle" class="modal-tab-pane">
       <div class="edit-grid">
-        <input type="text" id="setBundleName" placeholder="套組名稱">
-        <input type="number" id="setBundlePrice" placeholder="套組價格">
-        <select id="setBundleSeriesSelect" style="grid-column: span 2;"></select>
+        <input type="text" id="setBundleName" placeholder="套組名稱" style="grid-column: span 2;">
+        <input type="number" id="setBundlePrice" placeholder="套組價格" style="grid-column: span 2;">
+        <div style="grid-column: span 2;">
+          <div style="font-size:0.8rem; font-weight:bold; color:#475569; margin-bottom:2px;">所屬標籤 (可複選)：</div>
+          <div id="setBundleSeriesCheckboxes" style="display:flex; flex-wrap:wrap; gap:6px; max-height:80px; overflow-y:auto; background:#fff; padding:6px; border:1px solid var(--border); border-radius:6px;"></div>
+        </div>
         <input type="text" id="setBundleCustomDesc" placeholder="套組內容說明" style="grid-column: span 2;">
         <div style="grid-column: span 2; display:flex; align-items:center; gap:4px;">
           <input type="file" id="setBundleImg" accept="image/*" style="font-size:0.75rem; padding:4px;">
@@ -569,7 +572,6 @@
   let confirmStep = 0;
   let pendingImportData = null;
 
-  // 用於拖曳排序的暫存變數
   let draggedSeriesId = null;
 
   // 初始化預設示範方案
@@ -738,10 +740,20 @@
       return { order: idx, ...itm, seriesIds: sIds };
     });
 
+    // 套組相容轉換：將舊的 seriesId 轉為 seriesIds
+    const rawBundles = saved.bundles || [];
+    const processedBundles = rawBundles.map((bdl, idx) => {
+      let sIds = bdl.seriesIds;
+      if (!sIds) {
+        sIds = bdl.seriesId ? [bdl.seriesId] : [];
+      }
+      return { order: idx, ...bdl, seriesIds: sIds };
+    });
+
     currentPlanData = {
       series: saved.series || [],
       items: processedItems,
-      bundles: (saved.bundles || []).map((bdl, idx) => ({ order: idx, ...bdl })),
+      bundles: processedBundles,
       isStockTracking: !!saved.isStockTracking,
       orders: saved.orders || []
     };
@@ -823,7 +835,7 @@
       updateStockInputVisibility();
       renderSeriesManager();
       updateSeriesCheckboxes();
-      updateSeriesDropdowns();
+      updateBundleSeriesCheckboxes();
       renderBundleItemSelectors();
       renderItemConfigList();
       renderBundleConfigList();
@@ -913,7 +925,7 @@
     saveCurrentPlanData();
     renderSeriesManager();
     updateSeriesCheckboxes();
-    updateSeriesDropdowns();
+    updateBundleSeriesCheckboxes();
     renderAll();
     showToast(`已新增標籤：${name}`);
   }
@@ -939,7 +951,7 @@
       saveCurrentPlanData();
       renderSeriesManager();
       updateSeriesCheckboxes();
-      updateSeriesDropdowns();
+      updateBundleSeriesCheckboxes();
       renderAll();
       showToast('標籤已更名！');
     }
@@ -961,6 +973,7 @@
     saveCurrentPlanData();
     renderSeriesManager();
     updateSeriesCheckboxes();
+    updateBundleSeriesCheckboxes();
     renderAll();
   }
 
@@ -999,11 +1012,9 @@
 
     if (srcIdx < 0 || tgtIdx < 0) return;
 
-    // 調整順序
     const movedItem = currentPlanData.series.splice(srcIdx, 1)[0];
     currentPlanData.series.splice(tgtIdx, 0, movedItem);
 
-    // 重新賦予 order 數值
     currentPlanData.series.forEach((s, idx) => s.order = idx);
 
     saveCurrentPlanData();
@@ -1026,7 +1037,7 @@
     confirmTargetId = id;
     confirmStep = 1;
     document.getElementById('confirmModalTitle').innerText = '刪除標籤確認 (第 1 次確認)';
-    document.getElementById('confirmModalMsg').innerText = `確定要刪除標籤「${s ? s.name : ''}」嗎？（商品若只擁有此標籤將自動轉為未分類，不會被刪除）`;
+    document.getElementById('confirmModalMsg').innerText = `確定要刪除標籤「${s ? s.name : ''}」嗎？（品項或套組若只擁有此標籤將自動轉為未分類，不會被刪除）`;
     document.getElementById('confirmModalBtn').innerText = '下一步確認 →';
     document.getElementById('confirmModal').style.display = 'flex';
   }
@@ -1068,11 +1079,23 @@
     });
   }
 
-  function updateSeriesDropdowns() {
+  function updateBundleSeriesCheckboxes(selectedIds = []) {
     currentPlanData.series.sort((a, b) => a.order - b.order);
-    const bundleSel = document.getElementById('setBundleSeriesSelect');
-    const options = currentPlanData.series.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-    bundleSel.innerHTML = '<option value="">選擇標籤</option>' + options;
+    const box = document.getElementById('setBundleSeriesCheckboxes');
+    box.innerHTML = '';
+    if (currentPlanData.series.length === 0) {
+      box.innerHTML = '<div style="font-size:0.75rem; color:#64748b;">尚無標籤，請至「標籤系列」分頁新增</div>';
+      return;
+    }
+    currentPlanData.series.forEach(s => {
+      const isChecked = selectedIds.includes(s.id);
+      box.innerHTML += `
+        <label class="checkbox-chip">
+          <input type="checkbox" name="bundleSeriesCheck" value="${s.id}" ${isChecked ? 'checked' : ''}>
+          <span>${s.name}</span>
+        </label>
+      `;
+    });
   }
 
   function compressImage(file, callback) {
@@ -1291,7 +1314,7 @@
     const b = currentPlanData.bundles.find(s => s.id === id);
     if (!b) return;
     document.getElementById('setBundleName').value = b.name;
-    document.getElementById('setBundleSeriesSelect').value = b.seriesId || '';
+    updateBundleSeriesCheckboxes(b.seriesIds || []);
     document.getElementById('setBundlePrice').value = b.price;
     document.getElementById('setBundleCustomDesc').value = b.customDesc || '';
     document.getElementById('setBundleRequired').value = b.required || 0;
@@ -1305,7 +1328,7 @@
 
   function saveBundle() {
     const name = document.getElementById('setBundleName').value.trim();
-    const seriesId = document.getElementById('setBundleSeriesSelect').value || '';
+    const seriesIds = Array.from(document.querySelectorAll('input[name="bundleSeriesCheck"]:checked')).map(el => el.value);
     const price = parseFloat(document.getElementById('setBundlePrice').value);
     const customDesc = document.getElementById('setBundleCustomDesc').value.trim();
     const required = parseInt(document.getElementById('setBundleRequired').value, 10) || 0;
@@ -1322,7 +1345,7 @@
         const target = currentPlanData.bundles.find(s => s.id === editingBundleId);
         if (target) {
           target.name = name;
-          target.seriesId = seriesId;
+          target.seriesIds = seriesIds;
           target.price = price;
           target.customDesc = customDesc;
           target.required = required;
@@ -1336,12 +1359,12 @@
         showToast(`已更新：${name}`);
       } else {
         const maxOrder = currentPlanData.bundles.reduce((max, b) => Math.max(max, b.order || 0), -1);
-        currentPlanData.bundles.push({ id: 'bdl_' + Date.now(), name, seriesId, price, customDesc, required, fixedItemIds, selectableItemIds, img: imgBase64 || '', order: maxOrder + 1 });
+        currentPlanData.bundles.push({ id: 'bdl_' + Date.now(), name, seriesIds, price, customDesc, required, fixedItemIds, selectableItemIds, img: imgBase64 || '', order: maxOrder + 1 });
         showToast(`已新增套組：${name}`);
       }
 
       document.getElementById('setBundleName').value = '';
-      document.getElementById('setBundleSeriesSelect').value = '';
+      updateBundleSeriesCheckboxes([]);
       document.getElementById('setBundlePrice').value = '';
       document.getElementById('setBundleCustomDesc').value = '';
       document.getElementById('setBundleRequired').value = '0';
@@ -1364,7 +1387,7 @@
     if (editingBundleId === id) {
       editingBundleId = null;
       document.getElementById('setBundleName').value = '';
-      document.getElementById('setBundleSeriesSelect').value = '';
+      updateBundleSeriesCheckboxes([]);
       document.getElementById('setBundlePrice').value = '';
       document.getElementById('setBundleCustomDesc').value = '';
       document.getElementById('setBundleRequired').value = '0';
@@ -1668,6 +1691,12 @@
           return { order: idx, ...itm, seriesIds: sIds };
         });
 
+        importedData.bundles = (importedData.bundles || []).map((bdl, idx) => {
+          let sIds = bdl.seriesIds;
+          if (!sIds) sIds = bdl.seriesId ? [bdl.seriesId] : [];
+          return { order: idx, ...bdl, seriesIds: sIds };
+        });
+
         pendingImportData = importedData;
         inputEl.value = '';
         startImportPlanFlow();
@@ -1743,11 +1772,15 @@
             i.seriesIds = i.seriesIds.filter(id => id !== confirmTargetId);
           }
         });
-        currentPlanData.bundles.forEach(b => { if (b.seriesId === confirmTargetId) b.seriesId = ''; });
+        currentPlanData.bundles.forEach(b => {
+          if (b.seriesIds) {
+            b.seriesIds = b.seriesIds.filter(id => id !== confirmTargetId);
+          }
+        });
         saveCurrentPlanData();
         renderSeriesManager();
         updateSeriesCheckboxes();
-        updateSeriesDropdowns();
+        updateBundleSeriesCheckboxes();
         renderAll();
         if (s) showToast(`已刪除標籤：${s.name}`);
       } else if (confirmActionType === 'IMPORT_PLAN' && pendingImportData) {
@@ -1798,7 +1831,6 @@
         <button class="cat-del-btn" onclick="startDeleteSeriesFlow('${s.id}', event)" title="刪除標籤">✕</button>
       `;
 
-      // 綁定拖曳排序事件
       pill.addEventListener('dragstart', (e) => handleDragStart(e, s.id));
       pill.addEventListener('dragover', handleDragOver);
       pill.addEventListener('dragenter', (e) => handleDragEnter(e, s.id));
@@ -1837,7 +1869,7 @@
     currentPlanData.items.sort((a, b) => (a.order || 0) - (b.order || 0));
 
     const filteredBundles = currentPlanData.bundles.filter(b => {
-      const matchCat = activeCategoryFilter === 'ALL' || b.seriesId === activeCategoryFilter;
+      const matchCat = activeCategoryFilter === 'ALL' || (b.seriesIds && b.seriesIds.includes(activeCategoryFilter));
       const matchQ = !q || b.name.toLowerCase().includes(q);
       return matchCat && matchQ;
     });

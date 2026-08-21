@@ -131,7 +131,7 @@
 
     /* 方案管理卡片 */
     .plan-card { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; display: flex; justify-content: space-between; align-items: center; }
-  1.plan-info { flex: 1; cursor: pointer; }
+    .plan-info { flex: 1; cursor: pointer; }
     .plan-title { font-weight: bold; font-size: 1rem; color: #0f172a; }
     .plan-sub { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
     .plan-actions { display: flex; gap: 4px; }
@@ -265,9 +265,11 @@
   <div class="container">
     <div class="card">
       <h2>方案總覽</h2>
-      <div style="display:flex; gap:6px; margin-bottom:12px;">
-        <input type="text" id="newPlanName" placeholder="場次/展會名稱">
+      <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
+        <input type="text" id="newPlanName" placeholder="場次/展會名稱" style="flex:1; min-width:140px;">
         <button class="primary" style="white-space:nowrap;" onclick="createPlan('BLANK')">建立空白方案</button>
+        <button class="secondary" style="white-space:nowrap;" onclick="document.getElementById('homeImportFileInput').click()">匯入備份方案</button>
+        <input type="file" id="homeImportFileInput" accept=".json" style="display:none;" onchange="handleHomeImportPlanFile(this)">
       </div>
       <div id="planContainer" style="display:flex; flex-direction:column; gap:8px;"></div>
     </div>
@@ -642,7 +644,7 @@
     });
   }
 
-  function createPlan(type, sourcePlanId = null, customName = null) {
+  function createPlan(type, sourcePlanId = null, customName = null, importedData = null) {
     const input = document.getElementById('newPlanName');
     let name = customName || input.value.trim();
     if (!name) name = `新方案 (${new Date().toLocaleDateString()})`;
@@ -665,6 +667,8 @@
         isStockTracking: !!srcData.isStockTracking,
         orders: []
       };
+    } else if (type === 'IMPORT' && importedData) {
+      newData = importedData;
     }
 
     plansIndex.push({ id: newId, name, createdAt: new Date().toISOString() });
@@ -674,6 +678,41 @@
     input.value = '';
     renderPlanList();
     showToast(`方案「${name}」建立成功！`);
+  }
+
+  function handleHomeImportPlanFile(inputEl) {
+    const file = inputEl.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const fileJson = JSON.parse(e.target.result);
+        const importedData = fileJson.data || fileJson;
+        if (!importedData.series || !importedData.items || !importedData.bundles) throw new Error();
+
+        // 相容處理
+        importedData.items = (importedData.items || []).map((itm, idx) => {
+          let sIds = itm.seriesIds;
+          if (!sIds) sIds = itm.seriesId ? [itm.seriesId] : [];
+          return { order: idx, ...itm, seriesIds: sIds };
+        });
+
+        importedData.bundles = (importedData.bundles || []).map((bdl, idx) => {
+          let sIds = bdl.seriesIds;
+          if (!sIds) sIds = bdl.seriesId ? [bdl.seriesId] : [];
+          return { order: idx, ...bdl, seriesIds: sIds };
+        });
+
+        const defaultName = fileJson.planName ? fileJson.planName.replace('_備份', '') : `匯入方案 (${new Date().toLocaleDateString()})`;
+        createPlan('IMPORT', null, defaultName, importedData);
+        inputEl.value = '';
+      } catch (err) {
+        alert('檔案格式錯誤！請選擇正確的備份 JSON 檔案。');
+        inputEl.value = '';
+      }
+    };
+    reader.readAsText(file);
   }
 
   function openClonePlanModal(sourcePlanId, e) {

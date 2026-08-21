@@ -283,16 +283,15 @@
   <button class="fab-btn" id="fabConfigBtn" onclick="openConfigModal()" title="商品與標籤管理">＋</button>
 
   <div class="container" style="padding-bottom: 75px;">
-    <!-- 頂部資訊列 (左上角整合返回總覽與備份功能) -->
+    <!-- 頂部資訊列 (右上角獨立放置匯出與還原備份按鈕) -->
     <div class="top-bar">
+      <button class="btn-back-link" onclick="exitToPlanList()">‹ 方案總覽</button>
+      <div style="font-weight:bold; font-size:1.05rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:180px;" id="currentPlanTitle">方案名稱</div>
       <div style="display:flex; align-items:center; gap:4px;">
-        <button class="btn-back-link" onclick="exitToPlanList()">‹ 方案總覽</button>
         <button class="btn-top-backup" onclick="exportPlanJSON()">匯出備份</button>
         <button class="btn-top-backup" onclick="document.getElementById('inAppImportFileInput').click()">還原備份</button>
         <input type="file" id="inAppImportFileInput" accept=".json" style="display:none;" onchange="handleImportPlanFile(this)">
       </div>
-      <div style="font-weight:bold; font-size:1.05rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;" id="currentPlanTitle">方案名稱</div>
-      <div style="width:40px;"></div>
     </div>
 
     <!-- ================= Tab 1: 點選銷售 (極致純淨，只放銷售項目) ================= -->
@@ -368,7 +367,7 @@
   </div>
 </div>
 
-<!-- ================= 集中管理設定 Modal (單品、套組、標籤系列，已移除備份分頁) ================= -->
+<!-- ================= 集中管理設定 Modal (單品、套組、標籤系列) ================= -->
 <div class="modal-overlay" id="configModal">
   <div class="modal">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">

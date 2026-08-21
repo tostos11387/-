@@ -1367,10 +1367,16 @@
 
     const pool = (b.selectableItemIds || []).map(id => currentPlanData.items.find(x => x.id === id)).filter(Boolean);
 
-    if (b.required === 0 || pool.length === 0) {
+    // 如果不需自選、可選池為空，或者「自選數量」大於或等於「可選單品總數」
+    if (b.required === 0 || pool.length === 0 || b.required >= pool.length) {
       const picks = {};
       (b.fixedItemIds || []).forEach(id => picks[id] = (picks[id] || 0) + 1);
       
+      // 當自選數量 >= 可選總數時，把所有可選單品直接全部加入
+      if (b.required >= pool.length) {
+        pool.forEach(s => picks[s.id] = (picks[s.id] || 0) + 1);
+      }
+
       for (let i = 0; i < qty; i++) {
         currentPlanData.orders.push({
           id: Date.now() + i,

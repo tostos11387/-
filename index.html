@@ -375,11 +375,12 @@
       </div>
 
       <div style="display:flex; gap:6px; flex-direction:column; background:#f8fafc; padding:8px; border-radius:6px; border:1px solid var(--border); margin-bottom:10px;">
-        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px;">
-          <input type="text" id="newItemName" placeholder="單品名稱">
-          <select id="newItemSeriesSelect"></select>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <input type="text" id="newItemName" placeholder="單品名稱">
+        
+        <div style="font-size:0.8rem; font-weight:bold; color:#475569; margin-top:2px;">所屬標籤 (可複選)：</div>
+        <div id="newItemSeriesCheckboxes" style="display:flex; flex-wrap:wrap; gap:6px; max-height:80px; overflow-y:auto; background:#fff; padding:6px; border:1px solid var(--border); border-radius:6px;"></div>
+
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:4px;">
           <label style="font-size:0.8rem; color:#475569; display:flex; align-items:center; gap:4px;">
             <input type="checkbox" id="newItemCanSell" onchange="toggleCanSellInput(this.checked)" style="width:auto;"> 開放單買
           </label>
@@ -595,7 +596,6 @@
       const orderCount = (saved.orders || []).length;
       const totalMoney = (saved.orders || []).reduce((sum, o) => sum + (o.price || 0), 0);
       
-      // 轉換成詳細到秒的顯示格式 (YYYY-MM-DD HH:mm:ss)
       let dateStr = '';
       if (p.createdAt) {
         const d = new Date(p.createdAt);
@@ -722,9 +722,20 @@
     document.getElementById('currentPlanTitle').innerText = planMeta ? planMeta.name : '銷售方案';
 
     const saved = JSON.parse(localStorage.getItem(`plan_data_v27_${id}`) || '{}');
+    
+    // 相容舊資料轉換：若舊資料有 seriesId（單選字串），轉為 seriesIds（陣列）
+    const rawItems = saved.items || [];
+    const processedItems = rawItems.map((itm, idx) => {
+      let sIds = itm.seriesIds;
+      if (!sIds) {
+        sIds = itm.seriesId ? [itm.seriesId] : [];
+      }
+      return { order: idx, ...itm, seriesIds: sIds };
+    });
+
     currentPlanData = {
       series: saved.series || [],
-      items: (saved.items || []).map((itm, idx) => ({ order: idx, ...itm })),
+      items: processedItems,
       bundles: (saved.bundles || []).map((bdl, idx) => ({ order: idx, ...bdl })),
       isStockTracking: !!saved.isStockTracking,
       orders: saved.orders || []
@@ -806,6 +817,7 @@
       document.getElementById('stockTrackingToggle').checked = currentPlanData.isStockTracking;
       updateStockInputVisibility();
       renderSeriesManager();
+      updateSeriesCheckboxes();
       updateSeriesDropdowns();
       renderBundleItemSelectors();
       renderItemConfigList();
@@ -844,10 +856,13 @@
     document.getElementById('newItemPrice').style.display = canSell ? 'block' : 'none';
   }
 
-  function getSeriesName(seriesId) {
-    if (!seriesId) return '未分類';
-    const s = currentPlanData.series.find(x => x.id === seriesId);
-    return s ? s.name : '未分類';
+  function getSeriesNamesStr(seriesIds) {
+    if (!seriesIds || seriesIds.length === 0) return '未分類';
+    const names = seriesIds.map(id => {
+      const s = currentPlanData.series.find(x => x.id === id);
+      return s ? s.name : null;
+    }).filter(Boolean);
+    return names.length > 0 ? names.join(', ') : '未分類';
   }
 
   function calculateItemStockMap() {
@@ -892,6 +907,7 @@
     input.value = '';
     saveCurrentPlanData();
     renderSeriesManager();
+    updateSeriesCheckboxes();
     updateSeriesDropdowns();
     renderAll();
     showToast(`已新增標籤：${name}`);
@@ -917,6 +933,7 @@
       s.name = name;
       saveCurrentPlanData();
       renderSeriesManager();
+      updateSeriesCheckboxes();
       updateSeriesDropdowns();
       renderAll();
       showToast('標籤已更名！');
@@ -938,6 +955,7 @@
     currentPlanData.series.sort((a, b) => a.order - b.order);
     saveCurrentPlanData();
     renderSeriesManager();
+    updateSeriesCheckboxes();
     renderAll();
   }
 
@@ -948,7 +966,7 @@
     confirmTargetId = id;
     confirmStep = 1;
     document.getElementById('confirmModalTitle').innerText = '刪除標籤確認 (第 1 次確認)';
-    document.getElementById('confirmModalMsg').innerText = `確定要刪除標籤「${s ? s.name : ''}」嗎？（底下的商品將自動轉為未分類，不會被刪除）`;
+    document.getElementById('confirmModalMsg').innerText = `確定要刪除標籤「${s ? s.name : ''}」嗎？（商品若只擁有此標籤將自動轉為未分類，不會被刪除）`;
     document.getElementById('confirmModalBtn').innerText = '下一步確認 →';
     document.getElementById('confirmModal').style.display = 'flex';
   }
@@ -971,13 +989,29 @@
     });
   }
 
+  function updateSeriesCheckboxes(selectedIds = []) {
+    currentPlanData.series.sort((a, b) => a.order - b.order);
+    const box = document.getElementById('newItemSeriesCheckboxes');
+    box.innerHTML = '';
+    if (currentPlanData.series.length === 0) {
+      box.innerHTML = '<div style="font-size:0.75rem; color:#64748b;">尚無標籤，請至「標籤系列」分頁新增</div>';
+      return;
+    }
+    currentPlanData.series.forEach(s => {
+      const isChecked = selectedIds.includes(s.id);
+      box.innerHTML += `
+        <label class="checkbox-chip">
+          <input type="checkbox" name="itemSeriesCheck" value="${s.id}" ${isChecked ? 'checked' : ''}>
+          <span>${s.name}</span>
+        </label>
+      `;
+    });
+  }
+
   function updateSeriesDropdowns() {
     currentPlanData.series.sort((a, b) => a.order - b.order);
-    const itemSel = document.getElementById('newItemSeriesSelect');
     const bundleSel = document.getElementById('setBundleSeriesSelect');
     const options = currentPlanData.series.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-    
-    itemSel.innerHTML = '<option value="">選擇標籤</option>' + options;
     bundleSel.innerHTML = '<option value="">選擇標籤</option>' + options;
   }
 
@@ -1031,7 +1065,7 @@
     editingItemId = id;
     shouldRemoveItemImg = false;
     document.getElementById('newItemName').value = itm.name;
-    document.getElementById('newItemSeriesSelect').value = itm.seriesId || '';
+    updateSeriesCheckboxes(itm.seriesIds || []);
     document.getElementById('newItemCanSell').checked = itm.canSell || false;
     document.getElementById('newItemPrice').value = itm.price || 0;
     document.getElementById('newItemStock').value = itm.stock !== undefined ? itm.stock : 0;
@@ -1044,14 +1078,13 @@
 
   function saveItem() {
     const input = document.getElementById('newItemName');
-    const seriesSelect = document.getElementById('newItemSeriesSelect');
     const canSell = document.getElementById('newItemCanSell').checked;
     const priceInput = document.getElementById('newItemPrice');
     const stockInput = document.getElementById('newItemStock');
     const imgInput = document.getElementById('newItemImg');
 
     const name = input.value.trim();
-    const seriesId = seriesSelect.value || '';
+    const seriesIds = Array.from(document.querySelectorAll('input[name="itemSeriesCheck"]:checked')).map(el => el.value);
     const price = canSell ? (parseFloat(priceInput.value) || 0) : 0;
     const stock = parseInt(stockInput.value, 10) || 0;
     if (!name) return showToast('請輸入單品名稱', true);
@@ -1061,7 +1094,7 @@
         const target = currentPlanData.items.find(s => s.id === editingItemId);
         if (target) {
           target.name = name;
-          target.seriesId = seriesId;
+          target.seriesIds = seriesIds;
           target.canSell = canSell;
           target.price = price;
           target.stock = stock;
@@ -1073,11 +1106,12 @@
         showToast(`已更新：${name}`);
       } else {
         const maxOrder = currentPlanData.items.reduce((max, i) => Math.max(max, i.order || 0), -1);
-        currentPlanData.items.push({ id: 'itm_' + Date.now(), name, seriesId, canSell, price, stock, img: imgBase64 || '', order: maxOrder + 1 });
+        currentPlanData.items.push({ id: 'itm_' + Date.now(), name, seriesIds, canSell, price, stock, img: imgBase64 || '', order: maxOrder + 1 });
         showToast(`已新增：${name}`);
       }
 
       input.value = '';
+      updateSeriesCheckboxes([]);
       priceInput.value = '';
       stockInput.value = '';
       document.getElementById('newItemCanSell').checked = false;
@@ -1101,6 +1135,7 @@
     if (editingItemId === id) {
       editingItemId = null;
       document.getElementById('newItemName').value = '';
+      updateSeriesCheckboxes([]);
       document.getElementById('newItemPrice').value = '';
       document.getElementById('newItemStock').value = '';
       document.getElementById('newItemCanSell').checked = false;
@@ -1367,12 +1402,10 @@
 
     const pool = (b.selectableItemIds || []).map(id => currentPlanData.items.find(x => x.id === id)).filter(Boolean);
 
-    // 如果不需自選、可選池為空，或者「自選數量」大於或等於「可選單品總數」
     if (b.required === 0 || pool.length === 0 || b.required >= pool.length) {
       const picks = {};
       (b.fixedItemIds || []).forEach(id => picks[id] = (picks[id] || 0) + 1);
       
-      // 當自選數量 >= 可選總數時，把所有可選單品直接全部加入
       if (b.required >= pool.length) {
         pool.forEach(s => picks[s.id] = (picks[s.id] || 0) + 1);
       }
@@ -1430,7 +1463,7 @@
           ${s.img ? `<img src="${s.img}" class="img-thumb-sm">` : ''}
           <div>
             <span style="font-weight:600;">${s.name}</span>
-            <div style="font-size:0.75rem; color:#64748b;">${getSeriesName(s.seriesId)} ${currentPlanData.isStockTracking ? `(餘:${remain <= 0 ? '0' : remain})` : ''}</div>
+            <div style="font-size:0.75rem; color:#64748b;">${getSeriesNamesStr(s.seriesIds)} ${currentPlanData.isStockTracking ? `(餘:${remain <= 0 ? '0' : remain})` : ''}</div>
           </div>
         </div>
         <button class="toggle-btn ${isSelected ? 'selected' : ''}" ${isOut ? 'disabled' : ''} onclick="togglePick('${s.id}')">
@@ -1568,6 +1601,14 @@
         const data = JSON.parse(e.target.result);
         const importedData = data.data || data;
         if (!importedData.series || !importedData.items || !importedData.bundles) throw new Error();
+        
+        // 匯入相容轉換
+        importedData.items = (importedData.items || []).map((itm, idx) => {
+          let sIds = itm.seriesIds;
+          if (!sIds) sIds = itm.seriesId ? [itm.seriesId] : [];
+          return { order: idx, ...itm, seriesIds: sIds };
+        });
+
         pendingImportData = importedData;
         inputEl.value = '';
         startImportPlanFlow();
@@ -1637,13 +1678,20 @@
         const s = currentPlanData.series.find(x => x.id === confirmTargetId);
         currentPlanData.series = currentPlanData.series.filter(x => x.id !== confirmTargetId);
         if (activeCategoryFilter === confirmTargetId) activeCategoryFilter = 'ALL';
-        currentPlanData.items.forEach(i => { if (i.seriesId === confirmTargetId) i.seriesId = ''; });
+        
+        // 從所有單品的 seriesIds 中移除被刪除的標籤 id
+        currentPlanData.items.forEach(i => {
+          if (i.seriesIds) {
+            i.seriesIds = i.seriesIds.filter(id => id !== confirmTargetId);
+          }
+        });
         currentPlanData.bundles.forEach(b => { if (b.seriesId === confirmTargetId) b.seriesId = ''; });
         saveCurrentPlanData();
         renderSeriesManager();
+        updateSeriesCheckboxes();
         updateSeriesDropdowns();
         renderAll();
-        if (s) showToast(`已刪除標籤：${s.name}（商品已自動歸入全部顯示）`);
+        if (s) showToast(`已刪除標籤：${s.name}`);
       } else if (confirmActionType === 'IMPORT_PLAN' && pendingImportData) {
         currentPlanData = pendingImportData;
         pendingImportData = null;
@@ -1724,8 +1772,9 @@
       return matchCat && matchQ;
     });
 
+    // 修改單品篩選：只要單品的 seriesIds 包含當前過濾標籤即可符合
     const filteredItems = currentPlanData.items.filter(i => {
-      const matchCat = activeCategoryFilter === 'ALL' || i.seriesId === activeCategoryFilter;
+      const matchCat = activeCategoryFilter === 'ALL' || (i.seriesIds && i.seriesIds.includes(activeCategoryFilter));
       const matchQ = !q || i.name.toLowerCase().includes(q);
       return i.canSell && matchCat && matchQ;
     });
@@ -1832,7 +1881,7 @@
     const statGrid = document.getElementById('inventoryStatGrid');
     statGrid.innerHTML = '';
     
-    const visibleStockItems = currentPlanData.items.filter(itm => activeInventoryCategoryFilter === 'ALL' || itm.seriesId === activeInventoryCategoryFilter);
+    const visibleStockItems = currentPlanData.items.filter(itm => activeInventoryCategoryFilter === 'ALL' || (itm.seriesIds && itm.seriesIds.includes(activeInventoryCategoryFilter)));
     let hasAlert = false;
 
     if (visibleStockItems.length === 0) {
@@ -1992,16 +2041,16 @@
     csv += "\n【實體單品消耗與庫存】\n";
     const consumedMap = calculateItemStockMap();
     if (currentPlanData.isStockTracking) {
-      csv += "所屬系列,單品名稱,單買價,庫存,總消耗數,剩餘庫存\n";
+      csv += "所屬標籤,單品名稱,單買價,庫存,總消耗數,剩餘庫存\n";
       currentPlanData.items.forEach(s => {
         const sold = consumedMap[s.id] || 0;
         const initial = s.stock || 0;
-        csv += `"${getSeriesName(s.seriesId)}","${s.name}",${s.canSell ? s.price : '非單售'},${initial},${sold},${initial - sold}\n`;
+        csv += `"${getSeriesNamesStr(s.seriesIds)}","${s.name}",${s.canSell ? s.price : '非單售'},${initial},${sold},${initial - sold}\n`;
       });
     } else {
-      csv += "所屬系列,單品名稱,單買價,總消耗數\n";
+      csv += "所屬標籤,單品名稱,單買價,總消耗數\n";
       currentPlanData.items.forEach(s => {
-        csv += `"${getSeriesName(s.seriesId)}","${s.name}",${s.canSell ? s.price : '非單售'},${consumedMap[s.id] || 0}\n`;
+        csv += `"${getSeriesNamesStr(s.seriesIds)}","${s.name}",${s.canSell ? s.price : '非單售'},${consumedMap[s.id] || 0}\n`;
       });
     }
 

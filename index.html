@@ -333,9 +333,18 @@
           <div id="dailySalesList" style="margin-top: 8px; font-size: 0.85rem;"></div>
         </details>
 
+        <!-- 買量趨勢圖（可開關） -->
+        <details style="margin: 8px 0; background: #f8fafc; border: 1px solid var(--border); padding: 8px; border-radius: 6px;" id="trendChartDetails">
+          <summary style="font-size: 0.85rem; font-weight: bold; color: var(--primary); cursor: pointer;">查看買量趨勢圖</summary>
+          <div id="trendChartContainer" style="margin-top: 10px; padding: 6px; font-size: 0.8rem;"></div>
+        </details>
+
         <hr style="border:none; border-top:1px dashed var(--border); margin:12px 0;">
 
-        <h2>明細 (<span id="totalCount">0</span> 筆)</h2>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h2 style="margin-bottom:0;">明細 (<span id="totalCount">0</span> 筆)</h2>
+          <button class="sort-btn" id="btnLogSort" onclick="toggleLogSortOrder()" style="padding:4px 10px; font-size:0.8rem;">排序：最新在上</button>
+        </div>
         <div id="logList" style="max-height: 280px; overflow-y: auto;"></div>
 
         <div class="summary">
@@ -367,7 +376,7 @@
   </div>
 </div>
 
-<!-- ================= 集中管理設定 Modal (單品、套組、標籤系列) ================= -->
+<!-- ================= 集中管理設定 Modal (單品, 套組, 標籤系列) ================= -->
 <div class="modal-overlay" id="configModal">
   <div class="modal">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -579,6 +588,7 @@
   let pendingImportData = null;
 
   let draggedSeriesId = null;
+  let logSortNewestFirst = true;
 
   // 初始化預設示範方案
   if (plansIndex.length === 0) {
@@ -1758,6 +1768,16 @@
     document.getElementById('confirmModal').style.display = 'flex';
   }
 
+  // --- 明細排序切換 ---
+  function toggleLogSortOrder() {
+    logSortNewestFirst = !logSortNewestFirst;
+    const btn = document.getElementById('btnLogSort');
+    if (btn) {
+      btn.innerText = logSortNewestFirst ? '排序：最新在上' : '排序：最早在上';
+    }
+    renderAll();
+  }
+
   // --- 防呆確認流程 ---
   function startClearFlow() {
     if (currentPlanData.orders.length === 0) return showToast('目前無明細可清空！', true);
@@ -2058,6 +2078,7 @@
     const salesSummaryCounts = {};
     let totalMoney = 0;
     const dailyMap = {};
+    const hourlyMap = {}; // 用於買量趨勢圖（以小時統計）
 
     currentPlanData.orders.forEach(o => {
       totalMoney += o.price;
@@ -2077,11 +2098,45 @@
       salesSummaryCounts[currentDisplayName].qty += 1;
       salesSummaryCounts[currentDisplayName].total += o.price;
 
-      const dateStr = (o.createdAt || new Date().toISOString()).slice(0, 10);
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
       if (!dailyMap[dateStr]) dailyMap[dateStr] = { count: 0, total: 0 };
       dailyMap[dateStr].count += 1;
       dailyMap[dateStr].total += o.price;
+
+      // 買量趨勢（依小時，例如 "13:00"）
+      const hourStr = String(d.getHours()).padStart(2, '0') + ':00';
+      hourlyMap[hourStr] = (hourlyMap[hourStr] || 0) + 1;
     });
+
+    // 渲染買量趨勢圖
+    const trendContainer = document.getElementById('trendChartContainer');
+    if (trendContainer) {
+      const sortedHours = Object.keys(hourlyMap).sort();
+      if (sortedHours.length === 0) {
+        trendContainer.innerHTML = '<div style="color:#64748b; text-align:center; padding:6px;">尚無銷售數據可顯示趨勢</div>';
+      } else {
+        const maxCount = Math.max(...Object.values(hourlyMap), 1);
+        let chartHtml = '<div style="display:flex; align-items:flex-end; gap:8px; height:100px; padding:10px 4px 0 4px; border-bottom:1px solid var(--border); overflow-x:auto;">';
+        sortedHours.forEach(h => {
+          const count = hourlyMap[h];
+          const heightPercent = Math.round((count / maxCount) * 75);
+          chartHtml += `
+            <div style="flex:1; min-width:32px; display:flex; flex-direction:column; align-items:center; height:100%; justify-content:flex-end;">
+              <span style="font-size:0.7rem; font-weight:bold; color:var(--primary); margin-bottom:2px;">${count}</span>
+              <div style="width:100%; background:var(--primary); border-radius:4px 4px 0 0; height:${heightPercent}%; min-height:4px; transition: height 0.3s;"></div>
+              <span style="font-size:0.7rem; color:#64748b; margin-top:4px; white-space:nowrap;">${h}</span>
+            </div>
+          `;
+        });
+        chartHtml += '</div>';
+        trendContainer.innerHTML = chartHtml;
+      }
+    }
 
     const dailyListEl = document.getElementById('dailySalesList');
     dailyListEl.innerHTML = '';
@@ -2101,7 +2156,15 @@
 
     const itemSummaryGrid = document.getElementById('itemSummaryGrid');
     itemSummaryGrid.innerHTML = '';
-    Object.keys(salesSummaryCounts).forEach(name => {
+    
+    // 將各品項銷售累計依照「售出單數 (qty)」由高到低排序
+    const sortedSummaryNames = Object.keys(salesSummaryCounts).sort((a, b) => {
+      const diff = salesSummaryCounts[b].qty - salesSummaryCounts[a].qty;
+      if (diff !== 0) return diff;
+      return salesSummaryCounts[b].total - salesSummaryCounts[a].total; // 數量相同比營業額
+    });
+
+    sortedSummaryNames.forEach(name => {
       const data = salesSummaryCounts[name];
       itemSummaryGrid.innerHTML += `
         <div class="item-summary-card">
@@ -2113,7 +2176,13 @@
 
     const logList = document.getElementById('logList');
     logList.innerHTML = '';
-    currentPlanData.orders.forEach(o => {
+
+    let sortedOrders = [...currentPlanData.orders];
+    if (logSortNewestFirst) {
+      sortedOrders.reverse();
+    }
+
+    sortedOrders.forEach(o => {
       let displayName = o.name;
       if (o.bundleId) {
         const b = currentPlanData.bundles.find(x => x.id === o.bundleId);

@@ -160,6 +160,7 @@
     .item-summary-sub { font-size: 0.75rem; color: #64748b; margin-top: 2px; }
     .log-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
     .summary { background: #f1f5f9; border-radius: 8px; padding: 12px; margin-top: 8px; display: flex; justify-content: space-between; font-size: 1rem; font-weight: bold; }
+    .summary-total { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; }
     .action-group { display: flex; gap: 6px; margin-top: 8px; }
     .action-group button { flex: 1; padding: 12px; }
 
@@ -325,13 +326,12 @@
     <!-- ================= Tab 3: 銷售明細 (獨立專屬分頁) ================= -->
     <div id="tabDetails" class="tab-content">
       <div class="card">
+        <!-- 日期標籤切換列移到最上方 -->
+        <div style="font-size: 0.8rem; font-weight: bold; color: #475569; margin-bottom: 4px;">選擇統計日期：</div>
+        <div class="category-filter" id="detailDateTabs" style="margin-bottom: 12px;"></div>
+
         <h2>各品項銷售累計</h2>
         <div class="item-summary-grid" id="itemSummaryGrid"></div>
-
-        <details style="margin: 8px 0; background: #f8fafc; border: 1px solid var(--border); padding: 8px; border-radius: 6px;">
-          <summary style="font-size: 0.85rem; font-weight: bold; color: var(--primary); cursor: pointer;">依日期查看營業額拆分</summary>
-          <div id="dailySalesList" style="margin-top: 8px; font-size: 0.85rem;"></div>
-        </details>
 
         <!-- 買量趨勢圖（可開關） -->
         <details style="margin: 8px 0; background: #f8fafc; border: 1px solid var(--border); padding: 8px; border-radius: 6px;" id="trendChartDetails">
@@ -347,9 +347,16 @@
         </div>
         <div id="logList" style="max-height: 280px; overflow-y: auto;"></div>
 
+        <!-- 上方：單日營業額（不帶日期文字） -->
         <div class="summary">
-          <span>累計營業額：</span>
-          <span id="totalMoney" style="color:var(--primary);">$0</span>
+          <span>單日營業額：</span>
+          <span id="singleDayMoney" style="color:var(--primary); font-size: 1.15rem;">$0</span>
+        </div>
+
+        <!-- 下方：所有日子的總銷售額 -->
+        <div class="summary summary-total">
+          <span>累計總營業額：</span>
+          <span id="totalMoney" style="color:var(--primary); font-size: 1.15rem;">$0</span>
         </div>
 
         <div class="action-group">
@@ -571,6 +578,7 @@
 
   let activeCategoryFilter = 'ALL';
   let activeInventoryCategoryFilter = 'ALL';
+  let activeDetailDateFilter = 'ALL';
   let currentPick = { bundle: null, selectedIds: [], qty: 1, btnElement: null };
   let editingItemId = null;
   let editingBundleId = null;
@@ -811,6 +819,7 @@
 
     activeCategoryFilter = 'ALL';
     activeInventoryCategoryFilter = 'ALL';
+    activeDetailDateFilter = 'ALL';
 
     document.getElementById('viewPlanList').classList.remove('active');
     document.getElementById('viewMainApp').classList.add('active');
@@ -1778,6 +1787,12 @@
     renderAll();
   }
 
+  // --- 分日篩選切換 ---
+  function setDetailDateFilter(dateVal) {
+    activeDetailDateFilter = dateVal;
+    renderAll();
+  }
+
   // --- 防呆確認流程 ---
   function startClearFlow() {
     if (currentPlanData.orders.length === 0) return showToast('目前無明細可清空！', true);
@@ -2075,14 +2090,52 @@
     renderSalesSection();
     renderInventorySection();
 
-    const salesSummaryCounts = {};
+    // 1. 收集所有明細的日期與過濾
     let totalMoney = 0;
-    const dailyMap = {};
-    const hourlyMap = {}; // 用於買量趨勢圖（以小時統計）
+    const allDatesSet = new Set();
 
     currentPlanData.orders.forEach(o => {
       totalMoney += o.price;
-      
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      allDatesSet.add(dateStr);
+    });
+
+    const sortedDates = Array.from(allDatesSet).sort().reverse();
+    if (activeDetailDateFilter !== 'ALL' && !allDatesSet.has(activeDetailDateFilter)) {
+      activeDetailDateFilter = 'ALL';
+    }
+
+    // 渲染日期標籤列
+    const dateTabsEl = document.getElementById('detailDateTabs');
+    if (dateTabsEl) {
+      dateTabsEl.innerHTML = '';
+      dateTabsEl.innerHTML += `<div class="cat-pill ${activeDetailDateFilter === 'ALL' ? 'active' : ''}" onclick="setDetailDateFilter('ALL')">全部日期</div>`;
+      sortedDates.forEach(d => {
+        const isActive = activeDetailDateFilter === d;
+        dateTabsEl.innerHTML += `<div class="cat-pill ${isActive ? 'active' : ''}" onclick="setDetailDateFilter('${d}')">${d}</div>`;
+      });
+    }
+
+    // 過濾出目前選定日期的訂單
+    const filteredOrders = currentPlanData.orders.filter(o => {
+      if (activeDetailDateFilter === 'ALL') return true;
+      const d = o.createdAt ? new Date(o.createdAt) : new Date();
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}` === activeDetailDateFilter;
+    });
+
+    // 計算當前選定日期的營業額與品項累計
+    let singleDayMoney = 0;
+    const salesSummaryCounts = {};
+
+    filteredOrders.forEach(o => {
+      singleDayMoney += o.price;
       let currentDisplayName = o.name;
       if (o.bundleId) {
         const b = currentPlanData.bundles.find(x => x.id === o.bundleId);
@@ -2097,23 +2150,22 @@
       }
       salesSummaryCounts[currentDisplayName].qty += 1;
       salesSummaryCounts[currentDisplayName].total += o.price;
+    });
 
+    // 渲染買氣趨勢圖
+    const hourlyMap = {};
+    currentPlanData.orders.forEach(o => {
       const d = o.createdAt ? new Date(o.createdAt) : new Date();
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}-${mm}-${dd}`;
-
-      if (!dailyMap[dateStr]) dailyMap[dateStr] = { count: 0, total: 0 };
-      dailyMap[dateStr].count += 1;
-      dailyMap[dateStr].total += o.price;
-
-      // 買量趨勢（依小時，例如 "13:00"）
-      const hourStr = String(d.getHours()).padStart(2, '0') + ':00';
-      hourlyMap[hourStr] = (hourlyMap[hourStr] || 0) + 1;
+      if (activeDetailDateFilter === 'ALL' || dateStr === activeDetailDateFilter) {
+        const hourStr = String(d.getHours()).padStart(2, '0') + ':00';
+        hourlyMap[hourStr] = (hourlyMap[hourStr] || 0) + 1;
+      }
     });
 
-    // 渲染買量趨勢圖
     const trendContainer = document.getElementById('trendChartContainer');
     if (trendContainer) {
       const sortedHours = Object.keys(hourlyMap).sort();
@@ -2138,30 +2190,13 @@
       }
     }
 
-    const dailyListEl = document.getElementById('dailySalesList');
-    dailyListEl.innerHTML = '';
-    const dateKeys = Object.keys(dailyMap).sort().reverse();
-    if (dateKeys.length === 0) {
-      dailyListEl.innerHTML = '<div style="color:#64748b;">暫無紀錄</div>';
-    } else {
-      dateKeys.forEach(d => {
-        dailyListEl.innerHTML += `
-          <div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid #f1f5f9;">
-            <span><b>${d}</b></span>
-            <span>${dailyMap[d].count} 筆單 / <b style="color:var(--primary);">$${dailyMap[d].total}</b></span>
-          </div>
-        `;
-      });
-    }
-
+    // 渲染各品項銷售累計（依售出數量排序）
     const itemSummaryGrid = document.getElementById('itemSummaryGrid');
     itemSummaryGrid.innerHTML = '';
-    
-    // 將各品項銷售累計依照「售出單數 (qty)」由高到低排序
     const sortedSummaryNames = Object.keys(salesSummaryCounts).sort((a, b) => {
       const diff = salesSummaryCounts[b].qty - salesSummaryCounts[a].qty;
       if (diff !== 0) return diff;
-      return salesSummaryCounts[b].total - salesSummaryCounts[a].total; // 數量相同比營業額
+      return salesSummaryCounts[b].total - salesSummaryCounts[a].total;
     });
 
     sortedSummaryNames.forEach(name => {
@@ -2174,10 +2209,11 @@
         </div>`;
     });
 
+    // 渲染明細列表（明細時間使用 en-US 格式強制呈現 AM/PM）
     const logList = document.getElementById('logList');
     logList.innerHTML = '';
 
-    let sortedOrders = [...currentPlanData.orders];
+    let sortedOrders = [...filteredOrders];
     if (logSortNewestFirst) {
       sortedOrders.reverse();
     }
@@ -2199,7 +2235,15 @@
           return itm ? itm.name : id;
         }).join('+');
 
-      const timeStr = o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+      let timeStr = '';
+      if (o.createdAt) {
+        const dt = new Date(o.createdAt);
+        const m = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        // 使用 en-US 取得 AM/PM 格式的時間
+        const timePart = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+        timeStr = `${m}-${day} ${timePart}`;
+      }
 
       const row = document.createElement('div');
       row.className = 'log-item';
@@ -2219,7 +2263,9 @@
 
     document.getElementById('barCount').innerText = currentPlanData.orders.length;
     document.getElementById('barMoney').innerText = '$' + totalMoney;
-    document.getElementById('totalCount').innerText = currentPlanData.orders.length;
+    document.getElementById('totalCount').innerText = filteredOrders.length;
+    
+    document.getElementById('singleDayMoney').innerText = '$' + singleDayMoney;
     document.getElementById('totalMoney').innerText = '$' + totalMoney;
   }
 
